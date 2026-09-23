@@ -32,7 +32,7 @@ def simulate_iron_condor_backtest():
 
     dte_target = 40
     wing_width = 5.0
-    stop_loss_multiplier = 2.0  
+    stop_loss_multiplier = 2.5  
 
     trades = []
     
@@ -47,7 +47,7 @@ def simulate_iron_condor_backtest():
             continue
 
         # Wider strikes to reduce breach frequency (1.45 multiplier)
-        strike_offset = entry_price * vol * np.sqrt(dte_target / 365.0) * 1.45
+        strike_offset = entry_price * vol * np.sqrt(dte_target / 365.0) * 1.50
         short_put = round(entry_price - strike_offset, 0)
         short_call = round(entry_price + strike_offset, 0)
 
