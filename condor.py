@@ -40,7 +40,11 @@ def simulate_iron_condor_backtest(num_contracts):
 
         estimated_credit = round(wing_width * 0.30 * (1 + vol), 2)
         
-        # Multiply by 100 shares AND the number of contracts selected
+        # Calculate true max risk per share (Wing Width minus Credit received)
+        max_risk_per_share = wing_width - estimated_credit
+        # Cap the stop-loss so it can never exceed the true max risk of the spread
+        stop_loss_per_share = min(estimated_credit * stop_loss_multiplier, max_risk_per_share)
+        
         pnl = estimated_credit * 100 * num_contracts
         outcome = "Expired Full Profit"
 
@@ -50,7 +54,7 @@ def simulate_iron_condor_backtest(num_contracts):
             current_price = spy["Close"].iloc[i + j]
 
             if current_price <= short_put or current_price >= short_call:
-                pnl = -(estimated_credit * stop_loss_multiplier * 100 * num_contracts)
+                pnl = -(stop_loss_per_share * 100 * num_contracts)
                 outcome = "Stop-Loss Triggered"
                 break
             
@@ -82,11 +86,14 @@ if st.button("Run Simulation", type="primary"):
             winning_trades = len(df_trades[df_trades["PnL ($)"] > 0])
             total_trades = len(df_trades)
             win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+            
+            latest_trade_pnl = df_trades.iloc[-1]["PnL ($)"]
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Total Strategy PnL", f"${total_pnl:,.2f}")
-            col2.metric("Win Rate", f"{win_rate:.1f}%")
-            col3.metric("Total Trades", total_trades)
+            col2.metric("Latest Trade PnL", f"${latest_trade_pnl:,.2f}")
+            col3.metric("Win Rate", f"{win_rate:.1f}%")
+            col4.metric("Total Trades", total_trades)
 
             st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
