@@ -7,7 +7,19 @@ st.set_page_config(page_title="Iron Condor Backtest", layout="wide")
 
 st.title("SPY Iron Condor Strategy Dashboard")
 st.write("Running with wider OTM strikes (1.45x), 50% profit target, and 60-day entry spacing to reduce trade frequency.")
+# Function to fetch recent SPY price data dynamically
+@st.cache_data(ttl=3600)
+def load_live_spy_data():
+    spy = yf.Ticker("SPY")
+    df = spy.history(period="6mo")
+    return df
 
+# Load the data into the app
+data = load_live_spy_data()
+latest_close = data['Close'].iloc[-1]
+latest_date = data.index[-1].strftime('%Y-%m-%d')
+
+st.write(f"**Latest SPY Close Data As Of:** {latest_date} at **${latest_close:.2f}**")
 def simulate_iron_condor_backtest():
     spy = yf.download("SPY", start="2020-01-01", end="2026-01-01", progress=False)
 
