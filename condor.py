@@ -1,27 +1,15 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import yfinance as yf
 
-st.set_page_config(page_title="Iron Condor Backtest", layout="wide")
+st.title("SPY Iron Condor Live Backtest")
 
-st.title("SPY Iron Condor Strategy Dashboard")
-st.write("Running with wider OTM strikes (1.45x), 50% profit target, and 60-day entry spacing to reduce trade frequency.")
-# Function to fetch recent SPY price data dynamically
-@st.cache_data(ttl=3600)
-def load_live_spy_data():
-    spy = yf.Ticker("SPY")
-    df = spy.history(period="6mo")
-    return df
+# --- SIDEBAR CONTROLS ---
+st.sidebar.header("Strategy Settings")
+contracts = st.sidebar.number_input("Number of Contracts", min_v=1, max_value=50, value=5, step=1)
 
-# Load the data into the app
-data = load_live_spy_data()
-latest_close = data['Close'].iloc[-1]
-latest_date = data.index[-1].strftime('%Y-%m-%d')
-
-st.write(f"**Latest SPY Close Data As Of:** {latest_date} at **${latest_close:.2f}**")
-def simulate_iron_condor_backtest():
-    # Fetch data dynamically up to today instead of stopping at a hardcoded date
+def simulate_iron_condor_backtest(num_contracts):
     spy = yf.download("SPY", period="5y", progress=False)
 
     if isinstance(spy.columns, pd.MultiIndex):
@@ -46,14 +34,14 @@ def simulate_iron_condor_backtest():
             i += 60
             continue
 
-        # Wider strikes to reduce breach frequency (1.45 multiplier)
-        strike_offset = entry_price * vol * np.sqrt(dte_target / 365.0) * 1.55
+        strike_offset = entry_price * vol * np.sqrt(dte_target / 365.0) * 1.50
         short_put = round(entry_price - strike_offset, 0)
         short_call = round(entry_price + strike_offset, 0)
 
         estimated_credit = round(wing_width * 0.30 * (1 + vol), 2)
         
-        pnl = estimated_credit * 100  
+        # Multiply by 100 shares AND the number of contracts selected
+        pnl = estimated_credit * 100 * num_contracts
         outcome = "Expired Full Profit"
 
         for j in range(1, dte_target):
@@ -61,15 +49,13 @@ def simulate_iron_condor_backtest():
                 break
             current_price = spy["Close"].iloc[i + j]
 
-            # Check stop loss
             if current_price <= short_put or current_price >= short_call:
-                pnl = -(estimated_credit * stop_loss_multiplier * 100)
+                pnl = -(estimated_credit * stop_loss_multiplier * 100 * num_contracts)
                 outcome = "Stop-Loss Triggered"
                 break
             
-            # Early profit target: take 50% profit halfway through cycle if safe
             if j == int(dte_target / 2):
-                pnl = estimated_credit * 0.50 * 100
+                pnl = estimated_credit * 0.50 * 100 * num_contracts
                 outcome = "50% Profit Target Reached"
                 break
 
@@ -79,17 +65,17 @@ def simulate_iron_condor_backtest():
             "Entry Date": date_str,
             "Entry Price": round(float(entry_price), 2),
             "Short P/C": f"{int(short_put)} / {int(short_call)}",
-            "Credit Received": round(float(estimated_credit * 100), 2),
+            "Total Credit": round(float(estimated_credit * 100 * num_contracts), 2),
             "PnL ($)": round(float(pnl), 2),
             "Outcome": outcome,
         })
-        i += 60  # Spaced out entries every 60 days
+        i += 60  
         
     return pd.DataFrame(trades)
 
 if st.button("Run Simulation", type="primary"):
     with st.spinner("Running optimized backtest calculation..."):
-        df_trades = simulate_iron_condor_backtest()
+        df_trades = simulate_iron_condor_backtest(contracts)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -102,7 +88,7 @@ if st.button("Run Simulation", type="primary"):
             col2.metric("Win Rate", f"{win_rate:.1f}%")
             col3.metric("Total Trades", total_trades)
 
-            st.subheader("Trade Log")
+            st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
             st.warning("No trades were generated. Check date ranges.")
