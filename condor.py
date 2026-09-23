@@ -21,7 +21,8 @@ latest_date = data.index[-1].strftime('%Y-%m-%d')
 
 st.write(f"**Latest SPY Close Data As Of:** {latest_date} at **${latest_close:.2f}**")
 def simulate_iron_condor_backtest():
-    spy = yf.download("SPY", start="2020-01-01", end="2026-01-01", progress=False)
+    # Fetch data dynamically up to today instead of stopping at a hardcoded date
+    spy = yf.download("SPY", period="5y", progress=False)
 
     if isinstance(spy.columns, pd.MultiIndex):
         spy.columns = spy.columns.get_level_values(0)
