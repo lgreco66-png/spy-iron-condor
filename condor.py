@@ -7,7 +7,7 @@ st.title("SPY Iron Condor Live Backtest")
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("Strategy Settings")
-contracts = st.sidebar.number_input("Number of Contracts", min_v=1, max_value=50, value=5, step=1)
+contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=5, step=1)
 
 def simulate_iron_condor_backtest(num_contracts):
     spy = yf.download("SPY", period="5y", progress=False)
