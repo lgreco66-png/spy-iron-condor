@@ -1,6 +1,8 @@
 from decimal import Decimal
 import asyncio
 from datetime import date, timedelta
+import os
+from dotenv import load_dotenv
 from tastytrade import Session, Account
 from tastytrade.instruments import get_option_chain
 from tastytrade.order import (
@@ -10,8 +12,11 @@ from tastytrade.order import (
     Leg
 )
 
+# Load hidden variables from your computer's .env file
+load_dotenv()
+
 # ==========================================
-# STRATEGY CONFIGURATION (Unmanaged 90% Win-Rate Blueprint)
+# STRATEGY CONFIGURATION
 # ==========================================
 IS_CERTIFICATION = True  # True = Sandbox / Paper Trading environment
 TARGET_DTE = 40
@@ -22,9 +27,13 @@ TARGET_CREDIT = Decimal('1.50')  # Target net credit limit
 async def run_iron_condor_bot():
     print("--- Starting SPY Iron Condor Automation Script ---")
 
-    # 1. Authenticate to the tastytrade Sandbox Environment
-    # (Be sure to use your sandbox credentials or store them in environment variables)
-    session = Session('your_username_or_email', 'your_password', is_certification=IS_CERTIFICATION)
+    # 1. Authenticate using your hidden local environment variables
+    session = Session(
+        os.getenv('TASTY_USERNAME'), 
+        os.getenv('TASTY_PASSWORD'), 
+        is_certification=IS_CERTIFICATION
+    )
+    
     accounts = await Account.get(session)
     account = accounts[0]
     print(f"Successfully connected to Sandbox Account: {account.account_number}")
@@ -33,7 +42,6 @@ async def run_iron_condor_bot():
     target_date = date.today() + timedelta(days=TARGET_DTE)
     chain = await get_option_chain(session, 'SPY')
     
-    # Locate the valid expiration date closest to our 40-day target
     valid_expirations = [exp for exp in chain.keys() if exp >= target_date]
     if not valid_expirations:
         print("Error: No matching expiration dates found.")
@@ -44,17 +52,13 @@ async def run_iron_condor_bot():
 
     # 3. Construct the 4 Legs for the Iron Condor
     legs = [
-        # Leg 1: Short Put (Sell to Open)
         Leg(symbol='SPY_P_STRIKE_1', action=OrderAction.SELL_TO_OPEN, quantity=QUANTITY),
-        # Leg 2: Long Put - $5.00 lower wing (Buy to Open)
         Leg(symbol='SPY_P_STRIKE_2', action=OrderAction.BUY_TO_OPEN, quantity=QUANTITY),
-        # Leg 3: Short Call (Sell to Open)
         Leg(symbol='SPY_P_STRIKE_3', action=OrderAction.SELL_TO_OPEN, quantity=QUANTITY),
-        # Leg 4: Long Call - $5.00 higher wing (Buy to Open)
         Leg(symbol='SPY_P_STRIKE_4', action=OrderAction.BUY_TO_OPEN, quantity=QUANTITY),
     ]
 
-    # 4. Build the Net Credit Limit Order (GTC - Good-Til-Cancelled, unmanaged)
+    # 4. Build the Net Credit Limit Order
     order = LimitOrder(
         legs=legs,
         time_in_force=OrderTimeInForce.GTC,
