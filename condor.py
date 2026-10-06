@@ -21,8 +21,7 @@ trade_frequency = st.sidebar.slider("Trade Frequency (Days apart)", min_value=15
 
 def simulate_iron_condor_backtest(num_contracts, start_dt, end_dt, freq):
     # Fetch data based on selected date range
-    spy = yf.download("SPY", start=start_dt, end=end_dt, progress=False)
-
+    spy = yf.download("SPY", start=str(start_dt), end=str(end_dt), progress=False)
     if spy.empty:
         return pd.DataFrame()
 
