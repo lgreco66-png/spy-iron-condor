@@ -10,18 +10,18 @@ st.title("SPY Iron Condor Live Backtest")
 st.sidebar.header("Strategy Settings")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=5, step=1)
 
-# Add date range selectors so results change dynamically
 st.sidebar.subheader("Backtest Period")
 default_start = date.today() - timedelta(days=365 * 3)
 start_date = st.sidebar.date_input("Start Date", value=default_start)
 end_date = st.sidebar.date_input("End Date", value=date.today())
 
-# Add a frequency slider so you can control how often trades are put on
 trade_frequency = st.sidebar.slider("Trade Frequency (Days apart)", min_value=15, max_value=60, value=30, step=5)
 
+# --- FIXED FUNCTION TO ACCEPT AND USE DATES & FREQUENCY ---
 def simulate_iron_condor_backtest(num_contracts, start_dt, end_dt, freq):
-    # Fetch data based on selected date range
+    # Now explicitly using string conversions for start and end dates
     spy = yf.download("SPY", start=str(start_dt), end=str(end_dt), progress=False)
+
     if spy.empty:
         return pd.DataFrame()
 
@@ -84,12 +84,13 @@ def simulate_iron_condor_backtest(num_contracts, start_dt, end_dt, freq):
             "PnL ($)": round(float(pnl), 2),
             "Outcome": outcome,
         })
-        i += freq  # Uses your dynamic frequency slider instead of a locked 60 days
+        i += freq  
         
     return pd.DataFrame(trades)
 
 if st.button("Run Simulation", type="primary"):
     with st.spinner("Running dynamic backtest calculation..."):
+        # Passing the sidebar variables into the function correctly
         df_trades = simulate_iron_condor_backtest(contracts, start_date, end_date, trade_frequency)
         
         if not df_trades.empty:
