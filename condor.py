@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from datetime import date, timedelta
 
 st.title("SPY Iron Condor Live Backtest")
 
@@ -9,8 +10,21 @@ st.title("SPY Iron Condor Live Backtest")
 st.sidebar.header("Strategy Settings")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=5, step=1)
 
-def simulate_iron_condor_backtest(num_contracts):
-    spy = yf.download("SPY", period="5y", progress=False)
+# Add date range selectors so results change dynamically
+st.sidebar.subheader("Backtest Period")
+default_start = date.today() - timedelta(days=365 * 3)
+start_date = st.sidebar.date_input("Start Date", value=default_start)
+end_date = st.sidebar.date_input("End Date", value=date.today())
+
+# Add a frequency slider so you can control how often trades are put on
+trade_frequency = st.sidebar.slider("Trade Frequency (Days apart)", min_value=15, max_value=60, value=30, step=5)
+
+def simulate_iron_condor_backtest(num_contracts, start_dt, end_dt, freq):
+    # Fetch data based on selected date range
+    spy = yf.download("SPY", start=start_dt, end=end_dt, progress=False)
+
+    if spy.empty:
+        return pd.DataFrame()
 
     if isinstance(spy.columns, pd.MultiIndex):
         spy.columns = spy.columns.get_level_values(0)
@@ -31,7 +45,7 @@ def simulate_iron_condor_backtest(num_contracts):
         vol = spy["Volatility"].iloc[i]
 
         if np.isnan(vol):
-            i += 60
+            i += freq
             continue
 
         strike_offset = entry_price * vol * np.sqrt(dte_target / 365.0) * 1.50
@@ -40,9 +54,7 @@ def simulate_iron_condor_backtest(num_contracts):
 
         estimated_credit = round(wing_width * 0.30 * (1 + vol), 2)
         
-        # Calculate true max risk per share (Wing Width minus Credit received)
         max_risk_per_share = wing_width - estimated_credit
-        # Cap the stop-loss so it can never exceed the true max risk of the spread
         stop_loss_per_share = min(estimated_credit * stop_loss_multiplier, max_risk_per_share)
         
         pnl = estimated_credit * 100 * num_contracts
@@ -73,13 +85,13 @@ def simulate_iron_condor_backtest(num_contracts):
             "PnL ($)": round(float(pnl), 2),
             "Outcome": outcome,
         })
-        i += 60  
+        i += freq  # Uses your dynamic frequency slider instead of a locked 60 days
         
     return pd.DataFrame(trades)
 
 if st.button("Run Simulation", type="primary"):
-    with st.spinner("Running optimized backtest calculation..."):
-        df_trades = simulate_iron_condor_backtest(contracts)
+    with st.spinner("Running dynamic backtest calculation..."):
+        df_trades = simulate_iron_condor_backtest(contracts, start_date, end_date, trade_frequency)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -98,6 +110,6 @@ if st.button("Run Simulation", type="primary"):
             st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
-            st.warning("No trades were generated. Check date ranges.")
+            st.warning("No trades were generated for this date range. Try widening the dates.")
 else:
-    st.info("Click the **'Run Simulation'** button above to generate the backtest results.")
+    st.info("Adjust your settings in the sidebar and click **'Run Simulation'** to see dynamic results.")
