@@ -138,8 +138,98 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
             total_friction = (comm * 4 * num_contracts) + (slip * 4 * 100 * num_contracts)
 
             if hit_roll:
-                # DYNAMIC ROLL ENGINE: Log the adjustment loss, then immediately open a new condor at current price
                 pnl = -((active_trade["initial_credit"] * sl_mult - active_trade["initial_credit"]) * 100 * num_contracts) - total_friction
                 completed_trades.append({
                     "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
-                    "Exit Date": pd.to_datetime(spy
+                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
+                    "Short P/C": active_trade["Short P/C"],
+                    "Outcome": "Rolled (Defensive Adjustment)",
+                    "PnL ($)": round(pnl, 2)
+                })
+                
+                if i + target_dte < len(spy):
+                    T_entry = target_dte / 365.0
+                    strike_offset = cur_price * vol * math.sqrt(T_entry) * offset_m
+                    new_sp = round(cur_price - strike_offset, 0)
+                    new_lp = new_sp - width
+                    new_sc = round(cur_price + strike_offset, 0)
+                    new_lc = new_sc + width
+                    
+                    nsp_val = black_scholes_option_price(cur_price, new_sp, T_entry, risk_free_rate, vol, "put")
+                    nlp_val = black_scholes_option_price(cur_price, new_lp, T_entry, risk_free_rate, vol, "put")
+                    nsc_val = black_scholes_option_price(cur_price, new_sc, T_entry, risk_free_rate, vol, "call")
+                    nlc_val = black_scholes_option_price(cur_price, new_lc, T_entry, risk_free_rate, vol, "call")
+                    new_credit = (nsp_val - nlp_val) + (nsc_val - nlc_val)
+                    
+                    active_trade = {
+                        "Entry Date": spy.index[i],
+                        "Entry Price": cur_price,
+                        "Short P/C": f"{int(new_sp)} / {int(new_sc)}",
+                        "initial_credit": new_credit,
+                        "short_put_strike": new_sp,
+                        "long_put_strike": new_lp,
+                        "short_call_strike": new_sc,
+                        "long_call_strike": new_lc,
+                        "days_held": 0,
+                        "status": "Active"
+                    }
+                else:
+                    active_trade = None
+            elif hit_target:
+                pnl = (active_trade["initial_credit"] * pt_pct * 100 * num_contracts) - total_friction
+                completed_trades.append({
+                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
+                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
+                    "Short P/C": active_trade["Short P/C"],
+                    "Outcome": f"{int(pt_pct*100)}% Profit Target",
+                    "PnL ($)": round(pnl, 2)
+                })
+                active_trade = None
+            elif hit_management_dte:
+                pnl = ((active_trade["initial_credit"] - current_condor_value) * 100 * num_contracts) - total_friction
+                completed_trades.append({
+                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
+                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
+                    "Short P/C": active_trade["Short P/C"],
+                    "Outcome": f"Managed at {exit_dte} DTE",
+                    "PnL ($)": round(pnl, 2)
+                })
+                active_trade = None
+            elif expired:
+                pnl = (active_trade["initial_credit"] * 100 * num_contracts) - total_friction
+                completed_trades.append({
+                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
+                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
+                    "Short P/C": active_trade["Short P/C"],
+                    "Outcome": "Expired Full Profit",
+                    "PnL ($)": round(pnl, 2)
+                })
+                active_trade = None
+            
+            i += 1
+
+    return pd.DataFrame(completed_trades)
+
+if st.button("Run Dynamic Simulation", type="primary"):
+    with st.spinner("Executing dynamic rolling simulation..."):
+        df_trades = simulate_dynamic_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte, commission_per_contract, slippage_per_leg)
+        
+        if not df_trades.empty:
+            total_pnl = df_trades["PnL ($)"].sum()
+            winning_trades = len(df_trades[df_trades["PnL ($)"] > 0])
+            total_trades = len(df_trades)
+            win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+            latest_trade_pnl = df_trades.iloc[-1]["PnL ($)"] if not df_trades.empty else 0
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Strategy PnL", f"${total_pnl:,.2f}")
+            col2.metric("Latest Trade PnL", f"${latest_trade_pnl:,.2f}")
+            col3.metric("Win Rate", f"{win_rate:.1f}%")
+            col4.metric("Total Trades", total_trades)
+
+            st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
+            st.dataframe(df_trades, use_container_width=True)
+        else:
+            st.warning("No completed trades generated.")
+else:
+    st.info("Click **'Run Dynamic Simulation'** to see how the rolling engine performs.")
