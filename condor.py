@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import date, timedelta
 
 st.title("SPY Iron Condor Live Backtest")
 
@@ -10,17 +9,28 @@ st.title("SPY Iron Condor Live Backtest")
 st.sidebar.header("Strategy Settings")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=5, step=1)
 
-st.sidebar.subheader("Backtest Period")
-default_start = date.today() - timedelta(days=365 * 3)
-start_date = st.sidebar.date_input("Start Date", value=default_start)
-end_date = st.sidebar.date_input("End Date", value=date.today())
+# Bulletproof dropdown instead of date pickers
+timeframe_option = st.sidebar.selectbox(
+    "Backtest Timeframe",
+    options=["1 Year", "2 Years", "3 Years", "5 Years", "Max History"],
+    index=2 # Defaults to 3 Years
+)
 
 trade_frequency = st.sidebar.slider("Trade Frequency (Days apart)", min_value=15, max_value=60, value=30, step=5)
 
-# --- FIXED FUNCTION TO ACCEPT AND USE DATES & FREQUENCY ---
-def simulate_iron_condor_backtest(num_contracts, start_dt, end_dt, freq):
-    # Now explicitly using string conversions for start and end dates
-    spy = yf.download("SPY", start=str(start_dt), end=str(end_dt), progress=False)
+def simulate_iron_condor_backtest(num_contracts, timeframe, freq):
+    # Map the dropdown choice directly to yfinance period parameters
+    period_mapping = {
+        "1 Year": "1y",
+        "2 Years": "2y",
+        "3 Years": "3y",
+        "5 Years": "5y",
+        "Max History": "max"
+    }
+    selected_period = period_mapping.get(timeframe, "3y")
+
+    # Clean, reliable period fetch that yfinance never ignores
+    spy = yf.download("SPY", period=selected_period, progress=False)
 
     if spy.empty:
         return pd.DataFrame()
@@ -90,8 +100,7 @@ def simulate_iron_condor_backtest(num_contracts, start_dt, end_dt, freq):
 
 if st.button("Run Simulation", type="primary"):
     with st.spinner("Running dynamic backtest calculation..."):
-        # Passing the sidebar variables into the function correctly
-        df_trades = simulate_iron_condor_backtest(contracts, start_date, end_date, trade_frequency)
+        df_trades = simulate_iron_condor_backtest(contracts, timeframe_option, trade_frequency)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -110,6 +119,6 @@ if st.button("Run Simulation", type="primary"):
             st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
-            st.warning("No trades were generated for this date range. Try widening the dates.")
+            st.warning("No trades were generated for this timeframe.")
 else:
-    st.info("Adjust your settings in the sidebar and click **'Run Simulation'** to see dynamic results.")
+    st.info("Select a timeframe in the sidebar and click **'Run Simulation'**.")
