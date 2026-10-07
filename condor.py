@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from datetime import date, timedelta
 
 st.title("SPY Iron Condor Live Backtest")
 
@@ -9,28 +10,31 @@ st.title("SPY Iron Condor Live Backtest")
 st.sidebar.header("Strategy Settings")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=5, step=1)
 
-# Bulletproof dropdown instead of date pickers
 timeframe_option = st.sidebar.selectbox(
     "Backtest Timeframe",
-    options=["1 Year", "2 Years", "3 Years", "5 Years", "Max History"],
-    index=2 # Defaults to 3 Years
+    options=["1 Year", "3 Years", "5 Years", "Max History"],
+    index=1 # Defaults to 3 Years
 )
 
 trade_frequency = st.sidebar.slider("Trade Frequency (Days apart)", min_value=15, max_value=60, value=30, step=5)
 
 def simulate_iron_condor_backtest(num_contracts, timeframe, freq):
-    # Map the dropdown choice directly to yfinance period parameters
-    period_mapping = {
-        "1 Year": "1y",
-        "2 Years": "2y",
-        "3 Years": "3y",
-        "5 Years": "5y",
-        "Max History": "max"
-    }
-    selected_period = period_mapping.get(timeframe, "3y")
+    # Explicitly calculate date bounds so yfinance cannot ignore them
+    today = date.today()
+    if timeframe == "1 Year":
+        start_dt = today - timedelta(days=365)
+    elif timeframe == "3 Years":
+        start_dt = today - timedelta(days=365 * 3)
+    elif timeframe == "5 Years":
+        start_dt = today - timedelta(days=365 * 5)
+    else:  # Max History
+        start_dt = date(2015, 1, 1)
 
-    # Clean, reliable period fetch that yfinance never ignores
-    spy = yf.download("SPY", period=selected_period, progress=False)
+    # Force download with explicit string dates
+    spy = yf.download("SPY", start=str(start_dt), end=str(today), progress=False)
+
+    # --- DIAGNOSTIC CHECK ---
+    st.write(f"**Debug Info:** Timeframe selected: `{timeframe}` | Rows fetched from Yahoo Finance: `{len(spy)}`")
 
     if spy.empty:
         return pd.DataFrame()
