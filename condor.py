@@ -4,8 +4,6 @@ import pandas as pd
 import numpy as np
 from datetime import date, timedelta
 
-st.title("SPY Iron Condor Daily Portfolio Backtest")
-
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("Strategy Settings")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=1, step=1)
@@ -15,6 +13,9 @@ timeframe_option = st.sidebar.selectbox(
     options=["1 Month", "1 Year", "3 Years", "5 Years"],
     index=0 # Defaults to 1 Month
 )
+
+# --- DYNAMIC TITLE ---
+st.title(f"SPY Iron Condor Portfolio Backtest — {timeframe_option}")
 
 def simulate_iron_condor_backtest(num_contracts, timeframe):
     today = date.today()
@@ -77,8 +78,7 @@ def simulate_iron_condor_backtest(num_contracts, timeframe):
                 pnl = t["Credit"] * 100 * num_contracts
                 completed_trades.append({**t, "PnL ($)": round(pnl, 2), "Outcome": "Expired Full Profit"})
             elif is_last_day:
-                # If we reached the end of our historical data feed, mark open trades to market
-                pnl = t["Credit"] * 0.50 * 100 * num_contracts # Estimated open credit retention
+                pnl = t["Credit"] * 0.50 * 100 * num_contracts
                 completed_trades.append({**t, "PnL ($)": round(pnl, 2), "Outcome": "Still Open (Mark-to-Market)"})
             else:
                 still_active.append(t)
@@ -109,8 +109,8 @@ def simulate_iron_condor_backtest(num_contracts, timeframe):
         df["Entry Date"] = pd.to_datetime(df["Entry Date"]).dt.strftime("%Y-%m-%d")
     return df
 
-if st.button("Run Daily Portfolio Simulation", type="primary"):
-    with st.spinner("Running daily rolling simulation..."):
+if st.button("Run Portfolio Simulation", type="primary"):
+    with st.spinner("Running rolling simulation..."):
         df_trades = simulate_iron_condor_backtest(contracts, timeframe_option)
         
         if not df_trades.empty:
@@ -131,4 +131,4 @@ if st.button("Run Daily Portfolio Simulation", type="primary"):
         else:
             st.warning("No trades generated for this timeframe.")
 else:
-    st.info("Select your timeframe in the sidebar and click **'Run Daily Portfolio Simulation'**.")
+    st.info("Select your timeframe in the sidebar and click **'Run Portfolio Simulation'**.")
