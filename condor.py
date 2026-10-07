@@ -18,10 +18,11 @@ timeframe_option = st.sidebar.selectbox(
 target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=45, step=5)
 wing_width = st.sidebar.number_input("Wing Width ($)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
 
-# Optimized Levers for Positive Expectancy
-strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.4, max_value=2.2, value=1.85, step=0.05)
+# Optimized Levers
+strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.4, max_value=2.2, value=1.75, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.75, value=0.35, step=0.05)
 stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier", min_value=1.5, max_value=4.0, value=2.5, step=0.5)
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.10, max_value=1.00, value=0.20, step=0.05)
 
 # Friction Settings
 commission_per_contract = 0.65 
@@ -45,7 +46,7 @@ def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
         price = K * math.exp(-r * T) * normal_cdf(-d2) - S * normal_cdf(-d1)
     return max(0.01, price)
 
-def simulate_optimized_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult):
+def simulate_optimized_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult, min_cred):
     today = date.today()
     
     if timeframe == "1 Year":
@@ -132,7 +133,7 @@ def simulate_optimized_condor(num_contracts, timeframe, target_dte, width, offse
             
             net_credit = (sp_val - lp_val) + (sc_val - lc_val)
             
-            if net_credit > 0.40:
+            if net_credit >= min_cred:
                 active_trades.append({
                     "Entry Date": entry_date,
                     "Entry Price": float(entry_price),
@@ -152,7 +153,7 @@ def simulate_optimized_condor(num_contracts, timeframe, target_dte, width, offse
 
 if st.button("Run Optimized Simulation", type="primary"):
     with st.spinner("Running optimized portfolio simulation..."):
-        df_trades = simulate_optimized_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult)
+        df_trades = simulate_optimized_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -170,6 +171,6 @@ if st.button("Run Optimized Simulation", type="primary"):
             st.subheader(f"Optimized Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
-            st.warning("No completed trades generated for this configuration.")
+            st.warning("No completed trades generated for this configuration. Try lowering the Min Credit threshold or adjusting strikes.")
 else:
     st.info("Tune your strategy levers in the sidebar and click **'Run Optimized Simulation'**.")
