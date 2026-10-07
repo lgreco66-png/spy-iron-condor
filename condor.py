@@ -18,10 +18,11 @@ timeframe_option = st.sidebar.selectbox(
 target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=45, step=5)
 wing_width = st.sidebar.number_input("Wing Width ($)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
 
-# Tastytrade Mechanics Levers
-short_delta = st.sidebar.slider("Short Strike Delta", min_value=0.10, max_value=0.30, value=0.16, step=0.01)
+# Strategy Levers
+strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.0, max_value=2.0, value=1.40, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.75, value=0.50, step=0.05)
 stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier", min_value=1.5, max_value=4.0, value=2.0, step=0.5)
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.10, max_value=2.00, value=0.35, step=0.05)
 manage_at_dte = st.sidebar.slider("Early Management DTE", min_value=10, max_value=30, value=21, step=1)
 
 # Realistic Friction Controls
@@ -29,13 +30,10 @@ st.sidebar.subheader("Execution Friction")
 commission_per_contract = st.sidebar.number_input("Commission ($/contract)", min_value=0.0, max_value=2.0, value=0.65, step=0.05)
 slippage_per_leg = st.sidebar.number_input("Slippage ($/share/leg)", min_value=0.0, max_value=0.10, value=0.02, step=0.01)
 
-st.title(f"SPY 16-Delta Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
+st.title(f"SPY Sequential Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
 
 def normal_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-def normal_pdf(x):
-    return math.exp(-0.5 * x**2) / math.sqrt(2.0 * math.pi)
 
 def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
     if T <= 0 or sigma <= 0:
@@ -50,22 +48,7 @@ def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
         price = K * math.exp(-r * T) * normal_cdf(-d2) - S * normal_cdf(-d1)
     return max(0.01, price)
 
-def get_strike_by_delta(S, T, r, sigma, target_delta, option_type="put"):
-    # Iterative solver to find strike matching target delta using Black-Scholes formula
-    step = 1.0 if option_type == "put" else -1.0
-    K = S * (1.0 - (target_delta if option_type == "put" else -target_delta))
-    
-    for _ in range(30):
-        d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-        current_delta = normal_cdf(d1) if option_type == "call" else normal_cdf(d1) - 1.0
-        
-        diff = abs(current_delta) - target_delta
-        if abs(diff) < 0.001:
-            break
-        K += (1.0 if diff < 0 else -1.0) * 0.5
-    return round(K, 0)
-
-def simulate_delta_condor(num_contracts, timeframe, target_dte, width, target_del, pt_pct, sl_mult, exit_dte, comm, slip):
+def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult, min_cred, exit_dte, comm, slip):
     today = date.today()
     
     if timeframe == "1 Year":
@@ -102,11 +85,11 @@ def simulate_delta_condor(num_contracts, timeframe, target_dte, width, target_de
         if active_trade is None:
             if not np.isnan(vol) and current_date_obj >= eval_start and (i + target_dte < len(spy)):
                 T_entry = target_dte / 365.0
+                strike_offset = entry_price * vol * math.sqrt(T_entry) * offset_m
                 
-                # Precise Delta-based Strikes
-                short_put = get_strike_by_delta(entry_price, T_entry, risk_free_rate, vol, target_del, "put")
+                short_put = round(entry_price - strike_offset, 0)
                 long_put = short_put - width
-                short_call = get_strike_by_delta(entry_price, T_entry, risk_free_rate, vol, target_del, "call")
+                short_call = round(entry_price + strike_offset, 0)
                 long_call = short_call + width
                 
                 sp_val = black_scholes_option_price(entry_price, short_put, T_entry, risk_free_rate, vol, "put")
@@ -114,9 +97,9 @@ def simulate_delta_condor(num_contracts, timeframe, target_dte, width, target_de
                 sc_val = black_scholes_option_price(entry_price, short_call, T_entry, risk_free_rate, vol, "call")
                 lc_val = black_scholes_option_price(entry_price, long_call, T_entry, risk_free_rate, vol, "call")
                 
-                net_credit = (sp_val - lp_val) + (sc_val - lc_val) - (slip * 4)
+                net_credit = (sp_val - lp_val) + (sc_val - lc_val)
                 
-                if net_credit > 0.10:
+                if net_credit >= min_cred:
                     active_trade = {
                         "Entry Date": entry_date,
                         "Entry Price": entry_price,
@@ -198,9 +181,9 @@ def simulate_delta_condor(num_contracts, timeframe, target_dte, width, target_de
 
     return pd.DataFrame(completed_trades)
 
-if st.button("Run Delta-Based Simulation", type="primary"):
-    with st.spinner("Running delta-calibrated backtest..."):
-        df_trades = simulate_delta_condor(contracts, timeframe_option, target_dte, wing_width, short_delta, profit_target_pct, stop_loss_mult, manage_at_dte, commission_per_contract, slippage_per_leg)
+if st.button("Run Simulation", type="primary"):
+    with st.spinner("Running simulation..."):
+        df_trades = simulate_sequential_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte, commission_per_contract, slippage_per_leg)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -220,4 +203,4 @@ if st.button("Run Delta-Based Simulation", type="primary"):
         else:
             st.warning("No completed trades generated.")
 else:
-    st.info("Adjust slippage and delta in the sidebar, then click **'Run Delta-Based Simulation'**.")
+    st.info("Click **'Run Simulation'** to execute the backtest.")
