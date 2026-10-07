@@ -17,19 +17,21 @@ timeframe_option = st.sidebar.selectbox(
 
 target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=45, step=5)
 wing_width = st.sidebar.number_input("Wing Width ($)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
+
+# Optimized Levers for Positive Expectancy
+strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.4, max_value=2.2, value=1.85, step=0.05)
+profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.75, value=0.35, step=0.05)
 stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier", min_value=1.5, max_value=4.0, value=2.5, step=0.5)
 
 # Friction Settings
-commission_per_contract = 0.65 # Standard broker fee per leg
-slippage_per_leg = 0.05        # Estimated bid-ask spread slippage per leg
+commission_per_contract = 0.65 
+slippage_per_leg = 0.05        
 
-st.title(f"SPY Professional Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
+st.title(f"SPY Optimized Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
 
-# --- BUILT-IN MATH NORMAL CDF (Replaces SciPy) ---
 def normal_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
-# --- BLACK-SCHOLES PRICING FUNCTION ---
 def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
     if T <= 0 or sigma <= 0:
         return max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
@@ -43,7 +45,7 @@ def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
         price = K * math.exp(-r * T) * normal_cdf(-d2) - S * normal_cdf(-d1)
     return max(0.01, price)
 
-def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl_mult):
+def simulate_optimized_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult):
     today = date.today()
     
     if timeframe == "1 Year":
@@ -63,7 +65,7 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
         spy.columns = spy.columns.get_level_values(0)
 
     spy["Returns"] = spy["Close"].pct_change()
-    spy["Volatility"] = spy["Returns"].rolling(window=30).std() * np.sqrt(252)
+    spy["Volatility"] = spy["Returns"].rolling(window=30).std() * math.sqrt(252)
 
     risk_free_rate = 0.045
     active_trades = []
@@ -92,7 +94,7 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
             current_condor_value = (cur_short_put_price - cur_long_put_price) + (cur_short_call_price - cur_long_call_price)
             
             hit_stop = (current_condor_value >= t["initial_credit"] * sl_mult)
-            hit_target = (current_condor_value <= t["initial_credit"] * 0.50)
+            hit_target = (current_condor_value <= t["initial_credit"] * (1.0 - pt_pct))
             expired = (t["days_held"] >= target_dte)
 
             total_friction = (commission_per_contract * 4 * num_contracts) + (slippage_per_leg * 4 * 100 * num_contracts)
@@ -101,8 +103,8 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
                 pnl = -((t["initial_credit"] * sl_mult - t["initial_credit"]) * 100 * num_contracts) - total_friction
                 completed_trades.append({**t, "PnL ($)": round(pnl, 2), "Outcome": "Stop-Loss Triggered"})
             elif hit_target:
-                pnl = (t["initial_credit"] * 0.50 * 100 * num_contracts) - total_friction
-                completed_trades.append({**t, "PnL ($)": round(pnl, 2), "Outcome": "50% Profit Target"})
+                pnl = (t["initial_credit"] * pt_pct * 100 * num_contracts) - total_friction
+                completed_trades.append({**t, "PnL ($)": round(pnl, 2), "Outcome": f"{int(pt_pct*100)}% Profit Target"})
             elif expired:
                 pnl = (t["initial_credit"] * 100 * num_contracts) - total_friction
                 completed_trades.append({**t, "PnL ($)": round(pnl, 2), "Outcome": "Expired Full Profit"})
@@ -116,7 +118,7 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
         # Open new trades
         if not np.isnan(vol) and current_date_obj >= eval_start and (i + target_dte < len(spy)):
             T_entry = target_dte / 365.0
-            strike_offset = entry_price * vol * math.sqrt(T_entry) * 1.50
+            strike_offset = entry_price * vol * math.sqrt(T_entry) * offset_m
             
             short_put = round(entry_price - strike_offset, 0)
             long_put = short_put - width
@@ -130,7 +132,7 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
             
             net_credit = (sp_val - lp_val) + (sc_val - lc_val)
             
-            if net_credit > 0.50:
+            if net_credit > 0.40:
                 active_trades.append({
                     "Entry Date": entry_date,
                     "Entry Price": float(entry_price),
@@ -148,9 +150,9 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
         df["Entry Date"] = pd.to_datetime(df["Entry Date"]).dt.strftime("%Y-%m-%d")
     return df
 
-if st.button("Run Professional Simulation", type="primary"):
-    with st.spinner("Running Black-Scholes portfolio simulation..."):
-        df_trades = simulate_professional_condor(contracts, timeframe_option, target_dte, wing_width, stop_loss_mult)
+if st.button("Run Optimized Simulation", type="primary"):
+    with st.spinner("Running optimized portfolio simulation..."):
+        df_trades = simulate_optimized_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -165,9 +167,9 @@ if st.button("Run Professional Simulation", type="primary"):
             col3.metric("Win Rate", f"{win_rate:.1f}%")
             col4.metric("Total Trades", total_trades)
 
-            st.subheader(f"Professional Trade Log ({contracts} Contract(s) Sized)")
+            st.subheader(f"Optimized Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
             st.warning("No completed trades generated for this configuration.")
 else:
-    st.info("Configure your settings in the sidebar and click **'Run Professional Simulation'**.")
+    st.info("Tune your strategy levers in the sidebar and click **'Run Optimized Simulation'**.")
