@@ -18,17 +18,19 @@ timeframe_option = st.sidebar.selectbox(
 target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=45, step=5)
 wing_width = st.sidebar.number_input("Wing Width ($)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
 
-# Robust Strategy Levers
-strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.0, max_value=2.0, value=1.40, step=0.05)
+# Strategy Levers
+strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.2, max_value=2.2, value=1.60, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.75, value=0.50, step=0.05)
-stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier", min_value=1.5, max_value=4.0, value=2.5, step=0.5)
-min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.20, max_value=2.00, value=0.60, step=0.10)
+stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier", min_value=1.5, max_value=4.0, value=2.0, step=0.5)
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.20, max_value=2.00, value=0.50, step=0.10)
 
-# Friction Settings (Tastytrade standard commissions + slippage)
+use_trend_filter = st.sidebar.checkbox("Enable 200-Day SMA Trend Filter (Avoid Trading Against Trend)", value=True)
+
+# Friction Settings
 commission_per_contract = 0.65 
 slippage_per_leg = 0.05        
 
-st.title(f"SPY Sequential Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
+st.title(f"SPY Filtered Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
 
 def normal_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
@@ -46,7 +48,7 @@ def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
         price = K * math.exp(-r * T) * normal_cdf(-d2) - S * normal_cdf(-d1)
     return max(0.01, price)
 
-def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult, min_cred):
+def simulate_filtered_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult, min_cred, trend_filter):
     today = date.today()
     
     if timeframe == "1 Year":
@@ -56,7 +58,7 @@ def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offs
     else:
         eval_start = today - timedelta(days=365 * 5)
 
-    download_start = eval_start - timedelta(days=target_dte + 60)
+    download_start = eval_start - timedelta(days=target_dte + 250) # Extra buffer for 200 SMA
     spy = yf.download("SPY", start=str(download_start), end=str(today), progress=False)
 
     if spy.empty:
@@ -67,22 +69,31 @@ def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offs
 
     spy["Returns"] = spy["Close"].pct_change()
     spy["Volatility"] = spy["Returns"].rolling(window=30).std() * math.sqrt(252)
+    spy["SMA_200"] = spy["Close"].rolling(window=200).mean()
 
     risk_free_rate = 0.045
     completed_trades = []
     
     active_trade = None
-    i = 30
+    i = 200 # Start after SMA window
     
     while i < len(spy):
         entry_date = spy.index[i]
         entry_price = float(spy["Close"].iloc[i])
         vol = float(spy["Volatility"].iloc[i])
+        sma_200 = float(spy["SMA_200"].iloc[i])
         current_date_obj = pd.to_datetime(entry_date).date()
 
-        # If no active trade, try to open one
         if active_trade is None:
             if not np.isnan(vol) and current_date_obj >= eval_start and (i + target_dte < len(spy)):
+                
+                # Trend Filter Logic: If enabled, skip trading if SPY is too far extended from trend or moving sharply
+                if trend_filter:
+                    # Skip if price is more than 3% away from 200 SMA (high directional momentum risk)
+                    if abs(entry_price - sma_200) / sma_200 > 0.03:
+                        i += 1
+                        continue
+
                 T_entry = target_dte / 365.0
                 strike_offset = entry_price * vol * math.sqrt(T_entry) * offset_m
                 
@@ -108,14 +119,12 @@ def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offs
                         "long_put_strike": long_put,
                         "short_call_strike": short_call,
                         "long_call_strike": long_call,
-                        "days_held": 0,
-                        "entry_index": i
+                        "days_held": 0
                     }
                     i += 1
                     continue
             i += 1
         else:
-            # Manage active trade day-by-day
             active_trade["days_held"] += 1
             days_held = active_trade["days_held"]
             T_remaining = max(0.001, (target_dte - days_held) / 365.0)
@@ -144,7 +153,6 @@ def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offs
                     "Outcome": "Stop-Loss Triggered",
                     "PnL ($)": round(pnl, 2)
                 })
-                active_trade = None
             elif hit_target:
                 pnl = (active_trade["initial_credit"] * pt_pct * 100 * num_contracts) - total_friction
                 completed_trades.append({
@@ -154,7 +162,6 @@ def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offs
                     "Outcome": f"{int(pt_pct*100)}% Profit Target",
                     "PnL ($)": round(pnl, 2)
                 })
-                active_trade = None
             elif expired:
                 pnl = (active_trade["initial_credit"] * 100 * num_contracts) - total_friction
                 completed_trades.append({
@@ -164,15 +171,15 @@ def simulate_sequential_condor(num_contracts, timeframe, target_dte, width, offs
                     "Outcome": "Expired Full Profit",
                     "PnL ($)": round(pnl, 2)
                 })
-                active_trade = None
             
+            active_trade = None
             i += 1
 
     return pd.DataFrame(completed_trades)
 
-if st.button("Run Sequential Simulation", type="primary"):
-    with st.spinner("Running clean sequential backtest..."):
-        df_trades = simulate_sequential_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold)
+if st.button("Run Filtered Simulation", type="primary"):
+    with st.spinner("Running trend-filtered backtest..."):
+        df_trades = simulate_filtered_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, use_trend_filter)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -187,9 +194,9 @@ if st.button("Run Sequential Simulation", type="primary"):
             col3.metric("Win Rate", f"{win_rate:.1f}%")
             col4.metric("Total Trades", total_trades)
 
-            st.subheader(f"Sequential Trade Log ({contracts} Contract(s) Sized)")
+            st.subheader(f"Filtered Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
-            st.warning("No completed trades generated. Adjust parameters slightly.")
+            st.warning("No completed trades generated with current filters.")
 else:
-    st.info("Set your parameters in the sidebar and click **'Run Sequential Simulation'**.")
+    st.info("Toggle the trend filter and parameters in the sidebar, then click **'Run Filtered Simulation'**.")
