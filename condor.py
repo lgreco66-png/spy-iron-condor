@@ -22,15 +22,14 @@ wing_width = st.sidebar.number_input("Wing Width ($)", min_value=1.0, max_value=
 strike_offset_mult = st.sidebar.slider("Strike Offset Multiplier", min_value=1.0, max_value=2.0, value=1.40, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.75, value=0.50, step=0.05)
 stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier", min_value=1.5, max_value=4.0, value=2.0, step=0.5)
-min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.20, max_value=2.00, value=0.40, step=0.05)
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.20, max_value=2.00, value=0.60, step=0.10)
+manage_at_dte = st.sidebar.slider("Early Management DTE", min_value=10, max_value=30, value=21, step=1)
 
-use_trend_filter = st.sidebar.checkbox("Enable Trend Filter (Skip if >6% from 200 SMA)", value=False)
-
-# Friction Settings
+# Friction Settings (Tastytrade standard)
 commission_per_contract = 0.65 
 slippage_per_leg = 0.05        
 
-st.title(f"SPY Robust Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
+st.title(f"SPY Optimized Sequential Condor — {target_dte} DTE ({timeframe_option})")
 
 def normal_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
@@ -48,7 +47,7 @@ def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
         price = K * math.exp(-r * T) * normal_cdf(-d2) - S * normal_cdf(-d1)
     return max(0.01, price)
 
-def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult, min_cred, trend_filter):
+def simulate_optimized_sequential(num_contracts, timeframe, target_dte, width, offset_m, pt_pct, sl_mult, min_cred, exit_dte):
     today = date.today()
     
     if timeframe == "1 Year":
@@ -58,7 +57,7 @@ def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m
     else:
         eval_start = today - timedelta(days=365 * 5)
 
-    download_start = eval_start - timedelta(days=target_dte + 250)
+    download_start = eval_start - timedelta(days=target_dte + 60)
     spy = yf.download("SPY", start=str(download_start), end=str(today), progress=False)
 
     if spy.empty:
@@ -69,29 +68,21 @@ def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m
 
     spy["Returns"] = spy["Close"].pct_change()
     spy["Volatility"] = spy["Returns"].rolling(window=30).std() * math.sqrt(252)
-    spy["SMA_200"] = spy["Close"].rolling(window=200).mean()
 
     risk_free_rate = 0.045
     completed_trades = []
     
     active_trade = None
-    i = 200
+    i = 30
     
     while i < len(spy):
         entry_date = spy.index[i]
         entry_price = float(spy["Close"].iloc[i])
         vol = float(spy["Volatility"].iloc[i])
-        sma_200 = float(spy["SMA_200"].iloc[i])
         current_date_obj = pd.to_datetime(entry_date).date()
 
         if active_trade is None:
             if not np.isnan(vol) and current_date_obj >= eval_start and (i + target_dte < len(spy)):
-                
-                if trend_filter:
-                    if abs(entry_price - sma_200) / sma_200 > 0.06:
-                        i += 1
-                        continue
-
                 T_entry = target_dte / 365.0
                 strike_offset = entry_price * vol * math.sqrt(T_entry) * offset_m
                 
@@ -125,7 +116,8 @@ def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m
         else:
             active_trade["days_held"] += 1
             days_held = active_trade["days_held"]
-            T_remaining = max(0.001, (target_dte - days_held) / 365.0)
+            dte_remaining = target_dte - days_held
+            T_remaining = max(0.001, dte_remaining / 365.0)
             
             cur_price = float(spy["Close"].iloc[i])
             
@@ -138,6 +130,7 @@ def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m
             
             hit_stop = (current_condor_value >= active_trade["initial_credit"] * sl_mult)
             hit_target = (current_condor_value <= active_trade["initial_credit"] * (1.0 - pt_pct))
+            hit_management_dte = (dte_remaining <= exit_dte)
             expired = (days_held >= target_dte) or (i == len(spy) - 1)
 
             total_friction = (commission_per_contract * 4 * num_contracts) + (slippage_per_leg * 4 * 100 * num_contracts)
@@ -162,6 +155,17 @@ def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m
                     "PnL ($)": round(pnl, 2)
                 })
                 active_trade = None
+            elif hit_management_dte:
+                # Close at current market value when reaching management DTE
+                pnl = ((active_trade["initial_credit"] - current_condor_value) * 100 * num_contracts) - total_friction
+                completed_trades.append({
+                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
+                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
+                    "Short P/C": active_trade["Short P/C"],
+                    "Outcome": f"Managed at {exit_dte} DTE",
+                    "PnL ($)": round(pnl, 2)
+                })
+                active_trade = None
             elif expired:
                 pnl = (active_trade["initial_credit"] * 100 * num_contracts) - total_friction
                 completed_trades.append({
@@ -178,8 +182,8 @@ def simulate_robust_condor(num_contracts, timeframe, target_dte, width, offset_m
     return pd.DataFrame(completed_trades)
 
 if st.button("Run Simulation", type="primary"):
-    with st.spinner("Running backtest simulation..."):
-        df_trades = simulate_robust_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, use_trend_filter)
+    with st.spinner("Running simulation with early management..."):
+        df_trades = simulate_optimized_sequential(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte)
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -197,6 +201,6 @@ if st.button("Run Simulation", type="primary"):
             st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
-            st.warning("No completed trades generated. Try lowering the Min Credit threshold slightly.")
+            st.warning("No completed trades generated.")
 else:
-    st.info("Click **'Run Simulation'** to generate your performance metrics and trade log.")
+    st.info("Adjust the **Early Management DTE** in the sidebar and click **'Run Simulation'**.")
