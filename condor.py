@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from scipy.stats import norm
+import math
 from datetime import date, timedelta
 
 # --- SIDEBAR CONTROLS ---
@@ -25,22 +25,22 @@ slippage_per_leg = 0.05        # Estimated bid-ask spread slippage per leg
 
 st.title(f"SPY Professional Iron Condor Backtest — {target_dte} DTE ({timeframe_option})")
 
+# --- BUILT-IN MATH NORMAL CDF (Replaces SciPy) ---
+def normal_cdf(x):
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
 # --- BLACK-SCHOLES PRICING FUNCTION ---
 def black_scholes_option_price(S, K, T, r, sigma, option_type="call"):
-    """
-    Calculates Black-Scholes option price for European options.
-    S: Spot price, K: Strike price, T: Time to expiration (years), r: Risk-free rate, sigma: Volatility
-    """
     if T <= 0 or sigma <= 0:
         return max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
     
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
+    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
     
     if option_type == "call":
-        price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+        price = S * normal_cdf(d1) - K * math.exp(-r * T) * normal_cdf(d2)
     else:
-        price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+        price = K * math.exp(-r * T) * normal_cdf(-d2) - S * normal_cdf(-d1)
     return max(0.01, price)
 
 def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl_mult):
@@ -65,26 +65,25 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
     spy["Returns"] = spy["Close"].pct_change()
     spy["Volatility"] = spy["Returns"].rolling(window=30).std() * np.sqrt(252)
 
-    risk_free_rate = 0.045 # Assumed 4.5% risk-free rate
+    risk_free_rate = 0.045
     active_trades = []
     completed_trades = []
     
     for i in range(30, len(spy)):
         entry_date = spy.index[i]
-        entry_price = spy["Close"].iloc[i]
-        vol = spy["Volatility"].iloc[i]
+        entry_price = float(spy["Close"].iloc[i])
+        vol = float(spy["Volatility"].iloc[i])
         current_date_obj = pd.to_datetime(entry_date).date()
 
         # Update active positions
         still_active = []
-        current_price = spy["Close"].iloc[i]
+        current_price = float(spy["Close"].iloc[i])
         is_last_day = (i == len(spy) - 1)
 
         for t in active_trades:
             t["days_held"] += 1
             T_remaining = (target_dte - t["days_held"]) / 365.0
             
-            # Mark-to-market pricing for active legs using current price and vol
             cur_short_put_price = black_scholes_option_price(current_price, t["short_put_strike"], max(0.001, T_remaining), risk_free_rate, vol, "put")
             cur_long_put_price = black_scholes_option_price(current_price, t["long_put_strike"], max(0.001, T_remaining), risk_free_rate, vol, "put")
             cur_short_call_price = black_scholes_option_price(current_price, t["short_call_strike"], max(0.001, T_remaining), risk_free_rate, vol, "call")
@@ -93,10 +92,9 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
             current_condor_value = (cur_short_put_price - cur_long_put_price) + (cur_short_call_price - cur_long_call_price)
             
             hit_stop = (current_condor_value >= t["initial_credit"] * sl_mult)
-            hit_target = (current_condor_value <= t["initial_credit"] * 0.50) # 50% profit target
+            hit_target = (current_condor_value <= t["initial_credit"] * 0.50)
             expired = (t["days_held"] >= target_dte)
 
-            # Total round-trip friction for 4 legs (2 to open, 2 or 4 to close)
             total_friction = (commission_per_contract * 4 * num_contracts) + (slippage_per_leg * 4 * 100 * num_contracts)
 
             if hit_stop:
@@ -118,14 +116,13 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
         # Open new trades
         if not np.isnan(vol) and current_date_obj >= eval_start and (i + target_dte < len(spy)):
             T_entry = target_dte / 365.0
-            strike_offset = entry_price * vol * np.sqrt(T_entry) * 1.50
+            strike_offset = entry_price * vol * math.sqrt(T_entry) * 1.50
             
             short_put = round(entry_price - strike_offset, 0)
             long_put = short_put - width
             short_call = round(entry_price + strike_offset, 0)
             long_call = short_call + width
             
-            # Exact Black-Scholes premium calculation for legs
             sp_val = black_scholes_option_price(entry_price, short_put, T_entry, risk_free_rate, vol, "put")
             lp_val = black_scholes_option_price(entry_price, long_put, T_entry, risk_free_rate, vol, "put")
             sc_val = black_scholes_option_price(entry_price, short_call, T_entry, risk_free_rate, vol, "call")
@@ -133,10 +130,7 @@ def simulate_professional_condor(num_contracts, timeframe, target_dte, width, sl
             
             net_credit = (sp_val - lp_val) + (sc_val - lc_val)
             
-            # Subtract opening friction from initial credit
-            opening_friction = (commission_per_contract * 4 * num_contracts) + (slippage_per_leg * 4 * 100 * num_contracts)
-            
-            if net_credit > 0.50: # Ensure minimum viable credit
+            if net_credit > 0.50:
                 active_trades.append({
                     "Entry Date": entry_date,
                     "Entry Price": float(entry_price),
