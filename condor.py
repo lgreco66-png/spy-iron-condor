@@ -12,20 +12,28 @@ contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_valu
 
 timeframe_option = st.sidebar.selectbox(
     "Backtest Timeframe",
-    options=["1 Year", "3 Years", "5 Years"],
-    index=0 # Defaults to 1 Year
+    options=["1 Month", "1 Year", "3 Years", "5 Years"],
+    index=0 # Defaults to 1 Month
 )
 
 def simulate_iron_condor_backtest(num_contracts, timeframe):
     today = date.today()
-    if timeframe == "1 Year":
-        start_dt = today - timedelta(days=365)
+    
+    # Define evaluation start date and download buffer for indicators
+    if timeframe == "1 Month":
+        eval_start = today - timedelta(days=30)
+        download_start = today - timedelta(days=90) # Extra history for rolling volatility
+    elif timeframe == "1 Year":
+        eval_start = today - timedelta(days=365)
+        download_start = today - timedelta(days=365 + 60)
     elif timeframe == "3 Years":
-        start_dt = today - timedelta(days=365 * 3)
+        eval_start = today - timedelta(days=365 * 3)
+        download_start = today - timedelta(days=(365 * 3) + 60)
     else:
-        start_dt = today - timedelta(days=365 * 5)
+        eval_start = today - timedelta(days=365 * 5)
+        download_start = today - timedelta(days=(365 * 5) + 60)
 
-    spy = yf.download("SPY", start=str(start_dt), end=str(today), progress=False)
+    spy = yf.download("SPY", start=str(download_start), end=str(today), progress=False)
 
     if spy.empty:
         return pd.DataFrame()
@@ -43,13 +51,16 @@ def simulate_iron_condor_backtest(num_contracts, timeframe):
     active_trades = []
     completed_trades = []
     
-    # Loop day by day to open a trade every single session
+    # Loop day by day through the entire downloaded dataset
     for i in range(30, len(spy) - 1):
         entry_date = spy.index[i]
         entry_price = spy["Close"].iloc[i]
         vol = spy["Volatility"].iloc[i]
 
-        if not np.isnan(vol):
+        # Convert entry_date to date object for comparison
+        current_date_obj = pd.to_datetime(entry_date).date()
+
+        if not np.isnan(vol) and current_date_obj >= eval_start:
             strike_offset = entry_price * vol * np.sqrt(dte_target / 365.0) * 1.50
             short_put = round(entry_price - strike_offset, 0)
             short_call = round(entry_price + strike_offset, 0)
@@ -58,7 +69,6 @@ def simulate_iron_condor_backtest(num_contracts, timeframe):
             max_risk_per_share = wing_width - estimated_credit
             stop_loss_per_share = min(estimated_credit * stop_loss_multiplier, max_risk_per_share)
             
-            # Open new trade
             active_trades.append({
                 "Entry Date": entry_date,
                 "Entry Price": float(entry_price),
@@ -68,17 +78,16 @@ def simulate_iron_condor_backtest(num_contracts, timeframe):
                 "days_held": 0
             })
 
-        # Update all currently active positions for today's price action
+        # Update active positions
         still_active = []
         current_price = spy["Close"].iloc[i]
 
         for t in active_trades:
             t["days_held"] += 1
             
-            # Check exit conditions
             short_p, short_c = map(float, t["Short P/C"].split(" / "))
             hit_stop = (current_price <= short_p or current_price >= short_c)
-            hit_target = (t["days_held"] == int(dte_target / 2)) # 50% profit target
+            hit_target = (t["days_held"] == int(dte_target / 2))
             expired = (t["days_held"] >= dte_target)
 
             if hit_stop:
@@ -93,9 +102,8 @@ def simulate_iron_condor_backtest(num_contracts, timeframe):
             else:
                 still_active.append(t)
                 
-        active_trades = stillness = still_active
+        active_trades = still_active
 
-    # Convert results to DataFrame
     df = pd.DataFrame(completed_trades)
     if not df.empty and "Entry Date" in df.columns:
         df["Entry Date"] = pd.to_datetime(df["Entry Date"]).dt.strftime("%Y-%m-%d")
@@ -113,7 +121,7 @@ if st.button("Run Daily Portfolio Simulation", type="primary"):
             latest_trade_pnl = df_trades.iloc[-1]["PnL ($)"] if not df_trades.empty else 0
 
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Strategy PnL", f"${total_pnl:,.2f}")
+            col1.metric("Total Strategy PnF", f"${total_pnl:,.2f}")
             col2.metric("Latest Trade PnL", f"${latest_trade_pnl:,.2f}")
             col3.metric("Win Rate", f"{win_rate:.1f}%")
             col4.metric("Total Trades", total_trades)
@@ -121,6 +129,6 @@ if st.button("Run Daily Portfolio Simulation", type="primary"):
             st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
             st.dataframe(df_trades, use_container_width=True)
         else:
-            st.warning("No trades generated.")
+            st.warning("No trades generated for this timeframe (trades may still be active past the end date).")
 else:
-    st.info("Click **'Run Daily Portfolio Simulation'** to execute daily trade entries.")
+    st.info("Select '1 Month' in the sidebar and click **'Run Daily Portfolio Simulation'**.")
