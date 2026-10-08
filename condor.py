@@ -149,7 +149,6 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
                 
                 if i < len(spy) - 1:
                     T_entry = target_dte / 365.0
-                    # Asymmetric rolling defense: Widen strikes on roll to survive volatility
                     roll_offset_m = offset_m * 1.3
                     strike_offset = cur_price * vol * math.sqrt(T_entry) * roll_offset_m
                     
@@ -204,4 +203,35 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
                     "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
                     "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
                     "Short P/C": active_trade["Short P/C"],
-                    "Outcome
+                    "Outcome": "Expired Full Profit",
+                    "PnL ($)": round(pnl, 2)
+                })
+                active_trade = None
+            
+            i += 1
+
+    return pd.DataFrame(completed_trades)
+
+if st.button("Run Dynamic Simulation", type="primary"):
+    with st.spinner("Executing dynamic rolling simulation..."):
+        df_trades = simulate_dynamic_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte, commission_per_contract, slippage_per_leg)
+        
+        if not df_trades.empty:
+            total_pnl = df_trades["PnL ($)"].sum()
+            winning_trades = len(df_trades[df_trades["PnL ($)"] > 0])
+            total_trades = len(df_trades)
+            win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+            latest_trade_pnl = df_trades.iloc[-1]["PnL ($)"] if not df_trades.empty else 0
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Strategy PnL", f"${total_pnl:,.2f}")
+            col2.metric("Latest Trade PnL", f"${latest_trade_pnl:,.2f}")
+            col3.metric("Win Rate", f"{win_rate:.1f}%")
+            col4.metric("Total Trades", total_trades)
+
+            st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
+            st.dataframe(df_trades, use_container_width=True)
+        else:
+            st.warning("No completed trades generated.")
+else:
+    st.info("Click **'Run Dynamic Simulation'** to see how the asymmetric rolling engine performs.")
