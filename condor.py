@@ -146,7 +146,7 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
 
             total_friction = (comm * 4 * num_contracts) + (slip * 4 * 100 * num_contracts)
 
-            if hit_roll:
+           if hit_roll:
                 pnl = -((active_trade["initial_credit"] * sl_mult - active_trade["initial_credit"]) * 100 * num_contracts) - total_friction
                 completed_trades.append({
                     "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
@@ -158,7 +158,10 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
                 
                 if i < len(spy) - 1:
                     T_entry = target_dte / 365.0
-                    strike_offset = cur_price * vol * math.sqrt(T_entry) * offset_m
+                    # FIX: Widen the strikes on a roll to survive high-volatility clustering
+                    roll_offset_m = offset_m * 1.3 
+                    strike_offset = cur_price * vol * math.sqrt(T_entry) * roll_offset_m
+                    
                     new_sp = round(cur_price - strike_offset, 0)
                     new_lp = new_sp - width
                     new_sc = round(cur_price + strike_offset, 0)
@@ -184,36 +187,6 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
                     }
                 else:
                     active_trade = None
-            elif hit_target:
-                pnl = (active_trade["initial_credit"] * pt_pct * 100 * num_contracts) - total_friction
-                completed_trades.append({
-                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
-                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
-                    "Short P/C": active_trade["Short P/C"],
-                    "Outcome": f"{int(pt_pct*100)}% Profit Target",
-                    "PnL ($)": round(pnl, 2)
-                })
-                active_trade = None
-            elif hit_management_dte:
-                pnl = ((active_trade["initial_credit"] - current_condor_value) * 100 * num_contracts) - total_friction
-                completed_trades.append({
-                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
-                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
-                    "Short P/C": active_trade["Short P/C"],
-                    "Outcome": f"Managed at {exit_dte} DTE",
-                    "PnL ($)": round(pnl, 2)
-                })
-                active_trade = None
-            elif expired:
-                pnl = (active_trade["initial_credit"] * 100 * num_contracts) - total_friction
-                completed_trades.append({
-                    "Entry Date": pd.to_datetime(active_trade["Entry Date"]).strftime("%Y-%m-%d"),
-                    "Exit Date": pd.to_datetime(spy.index[i]).strftime("%Y-%m-%d"),
-                    "Short P/C": active_trade["Short P/C"],
-                    "Outcome": "Expired Full Profit",
-                    "PnL ($)": round(pnl, 2)
-                })
-                active_trade = None
             
             i += 1
 
