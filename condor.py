@@ -73,7 +73,7 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
     risk_free_rate = 0.045
     completed_trades = []
     
-   active_trade = None
+    active_trade = None
     i = 30
     
     while i < len(spy):
@@ -209,3 +209,27 @@ def simulate_dynamic_condor(num_contracts, timeframe, target_dte, width, offset_
             i += 1
 
     return pd.DataFrame(completed_trades)
+
+if st.button("Run Dynamic Simulation", type="primary"):
+    with st.spinner("Executing dynamic rolling simulation..."):
+        df_trades = simulate_dynamic_condor(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte, commission_per_contract, slippage_per_leg)
+        
+        if not df_trades.empty:
+            total_pnl = df_trades["PnL ($)"].sum()
+            winning_trades = len(df_trades[df_trades["PnL ($)"] > 0])
+            total_trades = len(df_trades)
+            win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+            latest_trade_pnl = df_trades.iloc[-1]["PnL ($)"] if not df_trades.empty else 0
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Strategy PnL", f"${total_pnl:,.2f}")
+            col2.metric("Latest Trade PnL", f"${latest_trade_pnl:,.2f}")
+            col3.metric("Win Rate", f"{win_rate:.1f}%")
+            col4.metric("Total Trades", total_trades)
+
+            st.subheader(f"Trade Log ({contracts} Contract(s) Sized)")
+            st.dataframe(df_trades, use_container_width=True)
+        else:
+            st.warning("No completed trades generated.")
+else:
+    st.info("Click **'Run Dynamic Simulation'** to see how the rolling engine performs.")
