@@ -6,7 +6,7 @@ import math
 from datetime import date, timedelta
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.header("Bull Put Spread Settings")
+st.sidebar.header("Bull Put Spread Settings (Optimized)")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=1, step=1)
 
 timeframe_option = st.sidebar.selectbox(
@@ -18,11 +18,11 @@ timeframe_option = st.sidebar.selectbox(
 target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=45, step=5)
 wing_width = st.sidebar.number_input("Spread Width ($)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
 
-# Strategy Levers
+# Optimized Strategy Levers
 strike_offset_mult = st.sidebar.slider("Put Strike Offset Multiplier", min_value=1.0, max_value=2.5, value=1.60, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.90, value=0.50, step=0.05)
-stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier (Risk Multiple)", min_value=1.5, max_value=4.0, value=2.0, step=0.1)
-min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.05, max_value=2.00, value=0.20, step=0.05)
+stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier (Risk Multiple)", min_value=1.5, max_value=4.0, value=2.5, step=0.1) # Optimized to 2.5x
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.05, max_value=2.00, value=0.25, step=0.05) # Optimized to $0.25
 manage_at_dte = st.sidebar.slider("Early Management DTE", min_value=10, max_value=30, value=14, step=1)
 
 # Realistic Friction Controls (2-leg spread)
@@ -30,7 +30,7 @@ st.sidebar.subheader("Execution Friction")
 commission_per_contract = st.sidebar.number_input("Commission ($/contract)", min_value=0.0, max_value=2.0, value=0.65, step=0.05)
 slippage_per_leg = st.sidebar.number_input("Slippage ($/share/leg)", min_value=0.0, max_value=0.10, value=0.02, step=0.01)
 
-st.title(f"SPY Bull Put Credit Spread — {target_dte} DTE ({timeframe_option})")
+st.title(f"SPY Bull Put Credit Spread (Optimized) — {target_dte} DTE ({timeframe_option})")
 
 def normal_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
@@ -79,7 +79,6 @@ def simulate_bull_put_spread(num_contracts, timeframe, target_dte, width, offset
         sma50 = float(spy["SMA_50"].iloc[i])
         current_date_obj = pd.to_datetime(entry_date).date()
 
-        # Directional filter: Only sell put spreads when price is above 50 SMA
         passes_trend = (entry_price > sma50)
 
         if active_trade is None:
@@ -119,8 +118,6 @@ def simulate_bull_put_spread(num_contracts, timeframe, target_dte, width, offset
             cur_lp = black_scholes_put_price(cur_price, active_trade["Long Put"], T_remaining, risk_free_rate, vol)
             
             current_spread_value = cur_sp - cur_lp
-            
-            # Friction calculation for 2 legs
             total_friction = (comm * 2 * num_contracts) + (slip * 2 * 100 * num_contracts)
 
             hit_stop = (current_spread_value >= active_trade["initial_credit"] * sl_mult)
@@ -173,8 +170,8 @@ def simulate_bull_put_spread(num_contracts, timeframe, target_dte, width, offset
 
     return pd.DataFrame(completed_trades)
 
-if st.button("Run Bull Put Simulation", type="primary"):
-    with st.spinner("Executing directional backtest..."):
+if st.button("Run Optimized Simulation", type="primary"):
+    with st.spinner("Executing optimized backtest..."):
         df_trades = simulate_bull_put_spread(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte, commission_per_contract, slippage_per_leg)
         
         if not df_trades.empty:
@@ -195,4 +192,4 @@ if st.button("Run Bull Put Simulation", type="primary"):
         else:
             st.warning("No completed trades generated.")
 else:
-    st.info("Click **'Run Bull Put Simulation'** to test the directional credit spread model.")
+    st.info("Click **'Run Optimized Simulation'** to see how the wider stop-loss impacts total PnL.")
