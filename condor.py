@@ -22,7 +22,7 @@ wing_width = st.sidebar.number_input("Spread Width ($)", min_value=1.0, max_valu
 strike_offset_mult = st.sidebar.slider("Put Strike Offset Multiplier", min_value=1.0, max_value=2.5, value=1.60, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.90, value=0.50, step=0.05)
 stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier (Risk Multiple)", min_value=1.5, max_value=4.0, value=2.5, step=0.1) # Optimized to 2.5x
-min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.05, max_value=2.00, value=0.25, step=0.05) # Optimized to $0.25
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.05, max_value=2.00, value=0.18, step=0.05)
 manage_at_dte = st.sidebar.slider("Early Management DTE", min_value=10, max_value=30, value=14, step=1)
 
 # Realistic Friction Controls (2-leg spread)
