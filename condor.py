@@ -5,7 +5,10 @@ import numpy as np
 import math
 from datetime import date, timedelta
 
-# --- SIDEBAR CONTROLS ---
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="SPY Selective Bull Put Spread", layout="wide")
+
+# --- SIDEBAR CONTROLS (LOCKED-IN WINNING DEFAULTS) ---
 st.sidebar.header("Selective Bull Put Settings")
 contracts = st.sidebar.number_input("Number of Contracts", min_value=1, max_value=50, value=1, step=1)
 
@@ -15,16 +18,16 @@ timeframe_option = st.sidebar.selectbox(
     index=1
 )
 
-target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=45, step=5)
+target_dte = st.sidebar.slider("Target DTE (Days to Expiration)", min_value=30, max_value=60, value=40, step=5)
 wing_width = st.sidebar.number_input("Spread Width ($)", min_value=1.0, max_value=20.0, value=5.0, step=1.0)
 
-# Selective High-Conviction Levers
-strike_offset_mult = st.sidebar.slider("Put Strike Offset Multiplier", min_value=1.0, max_value=2.5, value=1.50, step=0.05) # Closer to ATM for higher credit
+# Winning Baseline Levers
+strike_offset_mult = st.sidebar.slider("Put Strike Offset Multiplier", min_value=1.0, max_value=2.5, value=1.00, step=0.05)
 profit_target_pct = st.sidebar.slider("Profit Target (%)", min_value=0.25, max_value=0.90, value=0.50, step=0.05)
-stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier (Risk Multiple)", min_value=1.5, max_value=4.0, value=2.5, step=0.1)
-min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.10, max_value=2.00, value=0.22, step=0.05) # High quality filter
-manage_at_dte = st.sidebar.slider("Early Management DTE", min_value=10, max_value=30, value=14, step=1)
-cooldown_days = st.sidebar.slider("Cooldown Days After Exit", min_value=0, max_value=15, value=5, step=1) # Cuts churn
+stop_loss_mult = st.sidebar.slider("Stop-Loss Multiplier (Risk Multiple)", min_value=1.5, max_value=4.0, value=2.0, step=0.1)
+min_credit_threshold = st.sidebar.slider("Min Credit to Open ($)", min_value=0.10, max_value=2.00, value=0.10, step=0.05)
+manage_at_dte = st.sidebar.slider("Early Management DTE", min_value=10, max_value=30, value=10, step=1)
+cooldown_days = st.sidebar.slider("Cooldown Days After Exit", min_value=0, max_value=15, value=6, step=1)
 
 # Realistic Friction Controls (2-leg spread)
 st.sidebar.subheader("Execution Friction")
@@ -154,7 +157,7 @@ def simulate_bull_put_spread(num_contracts, timeframe, target_dte, width, offset
                     "PnL ($)": round(pnl, 2)
                 })
                 active_trade = None
-                cooldown_counter = cooldown # Trigger cooldown period
+                cooldown_counter = cooldown
             
             i += 1
 
@@ -162,7 +165,12 @@ def simulate_bull_put_spread(num_contracts, timeframe, target_dte, width, offset
 
 if st.button("Run Selective Simulation", type="primary"):
     with st.spinner("Executing selective backtest..."):
-        df_trades = simulate_bull_put_spread(contracts, timeframe_option, target_dte, wing_width, strike_offset_mult, profit_target_pct, stop_loss_mult, min_credit_threshold, manage_at_dte, cooldown_days, commission_per_contract, slippage_per_leg)
+        df_trades = simulate_bull_put_spread(
+            contracts, timeframe_option, target_dte, wing_width, 
+            strike_offset_mult, profit_target_pct, stop_loss_mult, 
+            min_credit_threshold, manage_at_dte, cooldown_days, 
+            commission_per_contract, slippage_per_leg
+        )
         
         if not df_trades.empty:
             total_pnl = df_trades["PnL ($)"].sum()
@@ -182,4 +190,4 @@ if st.button("Run Selective Simulation", type="primary"):
         else:
             st.warning("No completed trades generated.")
 else:
-    st.info("Click **'Run Selective Simulation'** to test the high-conviction, low-churn strategy.")
+    st.info("Click **'Run Selective Simulation'** to test the winning baseline strategy.")
